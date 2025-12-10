@@ -47,15 +47,15 @@ jobs:
           body=$(echo "$response" | sed '$d')
           
           echo "HTTP 状态码: $http_code"
-          echo "响应内容: $body"
           
           if [ "$http_code" -eq 200 ]; then
             echo "✅ 订单取消任务执行成功"
-            echo "response_body=$body" >> $GITHUB_OUTPUT
+            # 保存响应到文件，避免特殊字符问题
+            echo "$body" > /tmp/response.json
             echo "success=true" >> $GITHUB_OUTPUT
           else
             echo "❌ 订单取消任务执行失败"
-            echo "response_body=$body" >> $GITHUB_OUTPUT
+            echo "响应内容: $body"
             echo "success=false" >> $GITHUB_OUTPUT
             exit 1
           fi
@@ -64,11 +64,22 @@ jobs:
         if: steps.cancel_orders.outputs.success == 'true'
         run: |
           echo "执行结果详情:"
-          echo "${{ steps.cancel_orders.outputs.response_body }}" | jq '.'
           
-          # 提取关键信息
-          canceled_count=$(echo '${{ steps.cancel_orders.outputs.response_body }}' | jq -r '.canceledCount // 0')
-          echo "📦 本次取消订单数: $canceled_count"
+          # 从文件读取并格式化 JSON
+          if [ -f /tmp/response.json ]; then
+            cat /tmp/response.json | jq '.' || echo "JSON 解析失败，原始内容: $(cat /tmp/response.json)"
+            
+            # 提取关键信息（使用更安全的方式）
+            canceled_count=$(cat /tmp/response.json | jq -r '.canceledCount // 0' 2>/dev/null || echo "0")
+            message=$(cat /tmp/response.json | jq -r '.message // "无消息"' 2>/dev/null || echo "无消息")
+            
+            echo ""
+            echo "📊 执行摘要:"
+            echo "📦 本次取消订单数: $canceled_count"
+            echo "💬 执行消息: $message"
+          else
+            echo "⚠️ 未找到响应文件"
+          fi
       
       - name: ⚠️ 失败通知
         if: failure()
