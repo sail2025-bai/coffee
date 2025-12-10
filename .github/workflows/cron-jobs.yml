@@ -4,7 +4,7 @@ name: Scheduled Tasks
 on:
   schedule:
     # 每5分钟执行一次
-    - cron: '*/5 * * * *'
+    - cron: '*/1 * * * *'
   workflow_dispatch: # 允许手动触发
 
 jobs:
