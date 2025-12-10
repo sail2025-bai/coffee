@@ -1,0 +1,19 @@
+```yaml
+name: Scheduled Tasks
+
+on:
+  schedule:
+    # 每5分钟执行一次
+    - cron: '*/5 * * * *'
+  workflow_dispatch: # 允许手动触发
+
+jobs:
+  cancel-expired-orders:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cancel Expired Orders
+        run: |
+          curl -X POST ${{ secrets.SUPABASE_URL }}/functions/v1/cancel-expired-orders \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}" \
+            -H "Content-Type: application/json"
+```
