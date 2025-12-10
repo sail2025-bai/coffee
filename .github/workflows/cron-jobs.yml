@@ -1,19 +1,111 @@
-```yaml
-name: Scheduled Tasks
+name: 定时任务 - 自动取消超时订单
 
 on:
+  # 定时执行：每5分钟运行一次
   schedule:
-    # 每5分钟执行一次
-    - cron: '*/1 * * * *'
-  workflow_dispatch: # 允许手动触发
+    - cron: '*/5 * * * *'
+  
+  # 允许手动触发（用于测试）
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: '手动触发原因'
+        required: false
+        default: '测试定时任务'
+
+# 设置时区
+env:
+  TZ: 'Asia/Shanghai'
 
 jobs:
   cancel-expired-orders:
+    name: 取消超时订单
     runs-on: ubuntu-latest
+    
     steps:
-      - name: Cancel Expired Orders
+      - name: 📋 显示执行信息
         run: |
-          curl -X POST ${{ secrets.SUPABASE_URL }}/functions/v1/cancel-expired-orders \
+          echo "🕐 执行时间: $(date '+%Y-%m-%d %H:%M:%S %Z')"
+          echo "🔧 触发方式: ${{ github.event_name }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "📝 触发原因: ${{ github.event.inputs.reason }}"
+          fi
+          echo "🌐 Supabase URL: ${{ secrets.SUPABASE_URL }}"
+          echo "🔑 Anon Key 已配置: ${{ secrets.SUPABASE_ANON_KEY != '' }}"
+      
+      - name: 🚀 调用 Edge Function - 取消超时订单
+        id: cancel_orders
+        run: |
+          echo "正在调用 Edge Function..."
+          
+          response=$(curl -s -w "\n%{http_code}" -X POST \
+            "${{ secrets.SUPABASE_URL }}/functions/v1/cancel-expired-orders" \
             -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}" \
-            -H "Content-Type: application/json"
-```
+            -H "Content-Type: application/json")
+          
+          http_code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | sed '$d')
+          
+          echo "HTTP 状态码: $http_code"
+          echo "响应内容: $body"
+          
+          if [ "$http_code" -eq 200 ]; then
+            echo "✅ 订单取消任务执行成功"
+            echo "response_body=$body" >> $GITHUB_OUTPUT
+            echo "success=true" >> $GITHUB_OUTPUT
+          else
+            echo "❌ 订单取消任务执行失败"
+            echo "response_body=$body" >> $GITHUB_OUTPUT
+            echo "success=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+      
+      - name: 📊 解析执行结果
+        if: steps.cancel_orders.outputs.success == 'true'
+        run: |
+          echo "执行结果详情:"
+          echo "${{ steps.cancel_orders.outputs.response_body }}" | jq '.'
+          
+          # 提取关键信息
+          canceled_count=$(echo '${{ steps.cancel_orders.outputs.response_body }}' | jq -r '.canceledCount // 0')
+          echo "📦 本次取消订单数: $canceled_count"
+      
+      - name: ⚠️ 失败通知
+        if: failure()
+        run: |
+          echo "❌ 定时任务执行失败！"
+          echo "请检查："
+          echo "1. Supabase URL 是否正确"
+          echo "2. Anon Key 是否有效"
+          echo "3. Edge Function 是否已部署"
+          echo "4. 网络连接是否正常"
+
+  # 健康检查任务（每小时执行一次）
+  health-check:
+    name: 系统健康检查
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    
+    steps:
+      - name: 🏥 检查 Supabase 服务状态
+        run: |
+          echo "检查 Supabase 服务..."
+          
+          response=$(curl -s -w "\n%{http_code}" \
+            "${{ secrets.SUPABASE_URL }}/rest/v1/" \
+            -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}")
+          
+          http_code=$(echo "$response" | tail -n1)
+          
+          if [ "$http_code" -eq 200 ] || [ "$http_code" -eq 404 ]; then
+            echo "✅ Supabase 服务正常"
+          else
+            echo "⚠️ Supabase 服务可能存在问题 (HTTP $http_code)"
+          fi
+      
+      - name: 📈 显示统计信息
+        run: |
+          echo "=== 系统运行统计 ==="
+          echo "📅 检查时间: $(date '+%Y-%m-%d %H:%M:%S')"
+          echo "🔄 工作流运行次数: ${{ github.run_number }}"
+          echo "🏷️ 工作流 ID: ${{ github.run_id }}"
